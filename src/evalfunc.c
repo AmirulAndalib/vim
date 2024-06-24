@@ -28,6 +28,7 @@ static void f_balloon_show(typval_T *argvars, typval_T *rettv);
 static void f_balloon_split(typval_T *argvars, typval_T *rettv);
 # endif
 #endif
+static void f_bindtextdomain(typval_T *argvars, typval_T *rettv);
 static void f_byte2line(typval_T *argvars, typval_T *rettv);
 static void f_call(typval_T *argvars, typval_T *rettv);
 static void f_changenr(typval_T *argvars, typval_T *rettv);
@@ -1133,6 +1134,7 @@ static argcheck_T arg2_number_bool[] = {arg_number, arg_bool};
 static argcheck_T arg2_number_dict_any[] = {arg_number, arg_dict_any};
 static argcheck_T arg2_number_list[] = {arg_number, arg_list_any};
 static argcheck_T arg2_number_string[] = {arg_number, arg_string};
+static argcheck_T arg2_number_buffer[] = {arg_number, arg_buffer};
 static argcheck_T arg2_number_string_or_list[] = {arg_number, arg_string_or_list_any};
 static argcheck_T arg2_str_or_nr_or_list_dict[] = {arg_str_or_nr_or_list, arg_dict_any};
 static argcheck_T arg2_string[] = {arg_string, arg_string};
@@ -1823,6 +1825,8 @@ static funcentry_T global_functions[] =
 	    NULL
 #endif
 			},
+    {"bindtextdomain",	2, 2, 0,	    arg2_string,
+			ret_void,	    f_bindtextdomain},
     {"blob2list",	1, 1, FEARG_1,	    arg1_blob,
 			ret_list_number,    f_blob2list},
     {"browse",		4, 4, 0,	    arg4_browse,
@@ -2007,6 +2011,8 @@ static funcentry_T global_functions[] =
 			ret_void,	    f_feedkeys},
     {"file_readable",	1, 1, FEARG_1,	    arg1_string,	// obsolete
 			ret_number_bool,    f_filereadable},
+    {"filecopy",	2, 2, FEARG_1,	    arg2_string,
+			ret_number_bool,    f_filecopy},
     {"filereadable",	1, 1, FEARG_1,	    arg1_string,
 			ret_number_bool,    f_filereadable},
     {"filewritable",	1, 1, FEARG_1,	    arg1_string,
@@ -2151,7 +2157,7 @@ static funcentry_T global_functions[] =
 			ret_any,	    f_gettabwinvar},
     {"gettagstack",	0, 1, FEARG_1,	    arg1_number,
 			ret_dict_any,	    f_gettagstack},
-    {"gettext",		1, 1, FEARG_1,	    arg1_string,
+    {"gettext",		1, 2, FEARG_1,	    arg2_string,
 			ret_string,	    f_gettext},
     {"getwininfo",	0, 1, FEARG_1,	    arg1_number,
 			ret_list_dict_any,  f_getwininfo},
@@ -2419,6 +2425,8 @@ static funcentry_T global_functions[] =
 			ret_void,	    PROP_FUNC(f_popup_move)},
     {"popup_notification", 2, 2, FEARG_1,   arg2_str_or_nr_or_list_dict,
 			ret_number,	    PROP_FUNC(f_popup_notification)},
+    {"popup_setbuf",	2, 2, FEARG_1,	    arg2_number_buffer,
+			ret_number_bool,    PROP_FUNC(f_popup_setbuf)},
     {"popup_setoptions", 2, 2, FEARG_1,	    arg2_number_dict_any,
 			ret_void,	    PROP_FUNC(f_popup_setoptions)},
     {"popup_settext",	2, 2, FEARG_1,	    arg2_number_string_or_list,
@@ -3472,6 +3480,24 @@ get_buf_arg(typval_T *arg)
 }
 
 /*
+ * "bindtextdomain(package, path)" function
+ */
+    static void
+f_bindtextdomain(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
+{
+    if (check_for_nonempty_string_arg(argvars, 0) == FAIL
+	    || check_for_nonempty_string_arg(argvars, 1) == FAIL)
+	return;
+
+    if (strcmp((const char *)argvars[0].vval.v_string, VIMPACKAGE) == 0)
+	semsg(_(e_invalid_argument_str), tv_get_string(&argvars[0]));
+    else
+	bindtextdomain((const char *)argvars[0].vval.v_string, (const char *)argvars[1].vval.v_string);
+
+    return;
+}
+
+/*
  * "byte2line(byte)" function
  */
     static void
@@ -4458,7 +4484,7 @@ f_exists_compiled(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 f_expand(typval_T *argvars, typval_T *rettv)
 {
     char_u	*s;
-    int		len;
+    size_t	len;
     int		options = WILD_SILENT|WILD_USE_NL|WILD_LIST_NOTFOUND;
     expand_T	xpc;
     int		error = FALSE;
@@ -5464,7 +5490,7 @@ f_getpos(typval_T *argvars, typval_T *rettv)
 /*
  * Convert from block_def to string
  */
-   static char_u *
+    static char_u *
 block_def2str(struct block_def *bd)
 {
     char_u *p, *ret;
@@ -5492,12 +5518,13 @@ getregionpos(
     pos_T	*p2,
     int		*inclusive,
     int		*region_type,
-    oparg_T	*oa)
+    oparg_T	*oap)
 {
     int		fnum1 = -1, fnum2 = -1;
     char_u	*type;
     buf_T	*findbuf;
     char_u	default_type[] = "v";
+    int		block_width = 0;
     int		is_select_exclusive;
     int		l;
 
@@ -5533,8 +5560,17 @@ getregionpos(
 	*region_type = MCHAR;
     else if (type[0] == 'V' && type[1] == NUL)
 	*region_type = MLINE;
-    else if (type[0] == Ctrl_V && type[1] == NUL)
+    else if (type[0] == Ctrl_V)
+    {
+	char_u *p = type + 1;
+
+	if (*p != NUL && ((block_width = getdigits(&p)) <= 0 || *p != NUL))
+	{
+	    semsg(_(e_invalid_value_for_argument_str_str), "type", type);
+	    return FAIL;
+	}
 	*region_type = MBLOCK;
+    }
     else
     {
 	semsg(_(e_invalid_value_for_argument_str_str), "type", type);
@@ -5594,31 +5630,12 @@ getregionpos(
 
     if (*region_type == MCHAR)
     {
-	// handle 'selection' == "exclusive"
+	// Handle 'selection' == "exclusive".
 	if (is_select_exclusive && !EQUAL_POS(*p1, *p2))
-	{
-	    if (p2->coladd > 0)
-		p2->coladd--;
-	    else if (p2->col > 0)
-	    {
-		p2->col--;
-
-		mb_adjustpos(curbuf, p2);
-	    }
-	    else if (p2->lnum > 1)
-	    {
-		p2->lnum--;
-		p2->col = ml_get_len(p2->lnum);
-		if (p2->col > 0)
-		{
-		    p2->col--;
-
-		    mb_adjustpos(curbuf, p2);
-		}
-	    }
-	}
-	// if fp2 is on NUL (empty line) inclusive becomes false
-	if (*ml_get_pos(p2) == NUL && !virtual_op)
+	    // When backing up to previous line, inclusive becomes false.
+	    *inclusive = !unadjust_for_sel_inner(p2);
+	// If p2 is on NUL (end of line), inclusive becomes false.
+	if (*inclusive && !virtual_op && *ml_get_pos(p2) == NUL)
 	    *inclusive = FALSE;
     }
     else if (*region_type == MBLOCK)
@@ -5627,16 +5644,18 @@ getregionpos(
 
 	getvvcol(curwin, p1, &sc1, NULL, &ec1);
 	getvvcol(curwin, p2, &sc2, NULL, &ec2);
-	oa->motion_type = MBLOCK;
-	oa->inclusive = TRUE;
-	oa->op_type = OP_NOP;
-	oa->start = *p1;
-	oa->end = *p2;
-	oa->start_vcol = MIN(sc1, sc2);
-	if (is_select_exclusive && ec1 < sc2 && 0 < sc2 && ec2 > ec1)
-	    oa->end_vcol = sc2 - 1;
+	oap->motion_type = MBLOCK;
+	oap->inclusive = TRUE;
+	oap->op_type = OP_NOP;
+	oap->start = *p1;
+	oap->end = *p2;
+	oap->start_vcol = MIN(sc1, sc2);
+	if (block_width > 0)
+	    oap->end_vcol = oap->start_vcol + block_width - 1;
+	else if (is_select_exclusive && ec1 < sc2 && 0 < sc2 && ec2 > ec1)
+	    oap->end_vcol = sc2 - 1;
 	else
-	    oa->end_vcol = MAX(ec1, ec2);
+	    oap->end_vcol = MAX(ec1, ec2);
     }
 
     // Include the trailing byte of a multi-byte char.
@@ -5714,7 +5733,6 @@ f_getregion(typval_T *argvars, typval_T *rettv)
 add_regionpos_range(typval_T *rettv, pos_T p1, pos_T p2)
 {
     list_T	*l1, *l2, *l3;
-    int		max_col1, max_col2;
 
     l1 = list_alloc();
     if (l1 == NULL)
@@ -5756,16 +5774,14 @@ add_regionpos_range(typval_T *rettv, pos_T p1, pos_T p2)
 	return;
     }
 
-    max_col1 = ml_get_len(p1.lnum);
     list_append_number(l2, curbuf->b_fnum);
     list_append_number(l2, p1.lnum);
-    list_append_number(l2, p1.col > max_col1 ? max_col1 : p1.col);
+    list_append_number(l2, p1.col);
     list_append_number(l2, p1.coladd);
 
-    max_col2 = ml_get_len(p2.lnum);
     list_append_number(l3, curbuf->b_fnum);
     list_append_number(l3, p2.lnum);
-    list_append_number(l3, p2.col > max_col2 ? max_col2 : p2.col);
+    list_append_number(l3, p2.col);
     list_append_number(l3, p2.coladd);
 }
 
@@ -5778,6 +5794,7 @@ f_getregionpos(typval_T *argvars, typval_T *rettv)
     pos_T	p1, p2;
     int		inclusive = TRUE;
     int		region_type = -1;
+    int		allow_eol = FALSE;
     oparg_T	oa;
     int		lnum;
 
@@ -5791,10 +5808,14 @@ f_getregionpos(typval_T *argvars, typval_T *rettv)
 		&p1, &p2, &inclusive, &region_type, &oa) == FAIL)
 	return;
 
+    if (argvars[2].v_type == VAR_DICT)
+	allow_eol = dict_get_bool(argvars[2].vval.v_dict, "eol", FALSE);
+
     for (lnum = p1.lnum; lnum <= p2.lnum; lnum++)
     {
-	struct block_def	bd;
-	pos_T			ret_p1, ret_p2;
+	pos_T		ret_p1, ret_p2;
+	char_u		*line = ml_get(lnum);
+	colnr_T		line_len = ml_get_len(lnum);
 
 	if (region_type == MLINE)
 	{
@@ -5805,13 +5826,37 @@ f_getregionpos(typval_T *argvars, typval_T *rettv)
 	}
 	else
 	{
+	    struct block_def	bd;
+
 	    if (region_type == MBLOCK)
 		block_prep(&oa, &bd, lnum, FALSE);
 	    else
 		charwise_block_prep(p1, p2, &bd, lnum, inclusive);
-	    if (bd.startspaces > 0)
+
+	    if (bd.is_oneChar)  // selection entirely inside one char
 	    {
-		ret_p1.col = bd.textcol;
+		if (region_type == MBLOCK)
+		{
+		    ret_p1.col = mb_prevptr(line, bd.textstart) - line + 1;
+		    ret_p1.coladd = bd.start_char_vcols
+					     - (bd.start_vcol - oa.start_vcol);
+		}
+		else
+		{
+		    ret_p1.col = p1.col + 1;
+		    ret_p1.coladd = p1.coladd;
+		}
+	    }
+	    else if (region_type == MBLOCK && oa.start_vcol > bd.start_vcol)
+	    {
+		// blockwise selection entirely beyond end of line
+		ret_p1.col = MAXCOL;
+		ret_p1.coladd = oa.start_vcol - bd.start_vcol;
+		bd.is_oneChar = TRUE;
+	    }
+	    else if (bd.startspaces > 0)
+	    {
+		ret_p1.col = mb_prevptr(line, bd.textstart) - line + 1;
 		ret_p1.coladd = bd.start_char_vcols - bd.startspaces;
 	    }
 	    else
@@ -5819,7 +5864,13 @@ f_getregionpos(typval_T *argvars, typval_T *rettv)
 		ret_p1.col = bd.textcol + 1;
 		ret_p1.coladd = 0;
 	    }
-	    if (bd.endspaces > 0)
+
+	    if (bd.is_oneChar)  // selection entirely inside one char
+	    {
+		ret_p2.col = ret_p1.col;
+		ret_p2.coladd = ret_p1.coladd + bd.startspaces + bd.endspaces;
+	    }
+	    else if (bd.endspaces > 0)
 	    {
 		ret_p2.col = bd.textcol + bd.textlen + 1;
 		ret_p2.coladd = bd.endspaces;
@@ -5830,6 +5881,22 @@ f_getregionpos(typval_T *argvars, typval_T *rettv)
 		ret_p2.coladd = 0;
 	    }
 	}
+
+	if (!allow_eol && ret_p1.col > line_len)
+	{
+	    ret_p1.col = 0;
+	    ret_p1.coladd = 0;
+	}
+	else if (ret_p1.col > line_len + 1)
+	    ret_p1.col = line_len + 1;
+
+	if (!allow_eol && ret_p2.col > line_len)
+	{
+	    ret_p2.col = ret_p1.col == 0 ? 0 : line_len;
+	    ret_p2.coladd = 0;
+	}
+	else if (ret_p2.col > line_len + 1)
+	    ret_p2.col = line_len + 1;
 
 	ret_p1.lnum = lnum;
 	ret_p2.lnum = lnum;
@@ -5987,11 +6054,39 @@ f_gettagstack(typval_T *argvars, typval_T *rettv)
     static void
 f_gettext(typval_T *argvars, typval_T *rettv)
 {
-    if (check_for_nonempty_string_arg(argvars, 0) == FAIL)
+#if defined(HAVE_BIND_TEXTDOMAIN_CODESET)
+    char *prev = NULL;
+#endif
+
+    if (check_for_nonempty_string_arg(argvars, 0) == FAIL
+	|| check_for_opt_string_arg(argvars, 1) == FAIL)
 	return;
 
     rettv->v_type = VAR_STRING;
-    rettv->vval.v_string = vim_strsave((char_u *)_(argvars[0].vval.v_string));
+
+    if (argvars[1].v_type == VAR_STRING &&
+	    argvars[1].vval.v_string != NULL &&
+	    *(argvars[1].vval.v_string) != NUL)
+    {
+#if defined(HAVE_BIND_TEXTDOMAIN_CODESET)
+	prev = bind_textdomain_codeset((const char *)argvars[1].vval.v_string, (char *)p_enc);
+#endif
+
+#if defined(HAVE_DGETTEXT)
+	rettv->vval.v_string = vim_strsave((char_u *)dgettext((const char *)argvars[1].vval.v_string, (const char *)argvars[0].vval.v_string));
+#else
+	textdomain((const char *)argvars[1].vval.v_string);
+	rettv->vval.v_string = vim_strsave((char_u *)_(argvars[0].vval.v_string));
+	textdomain(VIMPACKAGE);
+#endif
+
+#if defined(HAVE_BIND_TEXTDOMAIN_CODESET)
+	if (prev != NULL)
+	    bind_textdomain_codeset((const char *)argvars[1].vval.v_string, prev);
+#endif
+    }
+    else
+	rettv->vval.v_string = vim_strsave((char_u *)_(argvars[0].vval.v_string));
 }
 
 // for VIM_VERSION_ defines
@@ -10907,7 +11002,7 @@ f_shiftwidth(typval_T *argvars UNUSED, typval_T *rettv)
 	if (col < 0)
 	    return;	// type error; errmsg already given
 #ifdef FEAT_VARTABS
-	rettv->vval.v_number = get_sw_value_col(curbuf, col);
+	rettv->vval.v_number = get_sw_value_col(curbuf, col, FALSE);
 	return;
 #endif
     }

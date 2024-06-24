@@ -10486,6 +10486,38 @@ def Test_Ref_Class_Within_Same_Class()
   v9.CheckScriptFailure(lines, 'E1347: Not a valid interface: A', 3)
 enddef
 
+" Test for comparing a class referencing itself
+def Test_Object_Compare_With_Recursive_Class_Ref()
+  var lines =<< trim END
+    vim9script
+
+    class C
+    public var nest: C
+    endclass
+
+    var o1 = C.new()
+    o1.nest = o1
+
+    var result = o1 == o1
+    assert_equal(true, result)
+  END
+  v9.CheckScriptSuccess(lines)
+
+  lines =<< trim END
+    vim9script
+
+    class C
+        public var nest: C
+    endclass
+    var o1 = C.new()
+    var o2 = C.new(C.new())
+
+    var result = o1 == o2
+    assert_equal(false, result)
+  END
+  v9.CheckScriptSuccess(lines)
+enddef
+
 " Test for using a compound operator from a lambda function in an object method
 def Test_compound_op_in_objmethod_lambda()
   # Test using the "+=" operator
@@ -10722,6 +10754,26 @@ def Test_class_definition_in_a_function()
     defcompile
   END
   v9.CheckScriptFailure(lines, 'E1429: Class can only be used in a script', 1)
+enddef
+
+" Test for using [] with a class and an object
+def Test_class_object_index()
+  var lines =<< trim END
+    vim9script
+    class A
+    endclass
+    A[10] = 1
+  END
+  v9.CheckScriptFailure(lines, 'E689: Index not allowed after a class: A[10] = 1', 4)
+
+  lines =<< trim END
+    vim9script
+    class A
+    endclass
+    var a = A.new()
+    a[10] = 1
+  END
+  v9.CheckScriptFailure(lines, 'E689: Index not allowed after a object: a[10] = 1', 5)
 enddef
 
 " vim: ts=8 sw=2 sts=2 expandtab tw=80 fdm=marker

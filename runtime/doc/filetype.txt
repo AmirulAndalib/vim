@@ -1,4 +1,4 @@
-*filetype.txt*	For Vim version 9.1.  Last change: 2024 May 21
+*filetype.txt*	For Vim version 9.1.  Last change: 2024 May 23
 
 
 		  VIM REFERENCE MANUAL    by Bram Moolenaar
@@ -149,6 +149,7 @@ variables can be used to overrule the filetype used for certain extensions:
 	*.csh		g:filetype_csh		|ft-csh-syntax|
 	*.dat		g:filetype_dat
 	*.def		g:filetype_def
+	*.dsp		g:filetype_dsp
 	*.f		g:filetype_f		|ft-forth-syntax|
 	*.frm		g:filetype_frm		|ft-form-syntax|
 	*.fs		g:filetype_fs		|ft-forth-syntax|
@@ -637,6 +638,12 @@ to the details of that function in the call graph.
 
 The mapping can be disabled with: >
 	let g:no_gprof_maps = 1
+
+
+HARE							*ft-hare*
+
+Since the text for this plugin is rather long it has been put in a separate
+file: |ft_hare.txt|.
 
 
 JAVA							*ft-java-plugin*
