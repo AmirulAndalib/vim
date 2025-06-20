@@ -693,7 +693,7 @@ edit(
 			&& stop_arrow() == OK)
 		{
 		    ins_compl_delete();
-		    ins_compl_insert(FALSE, FALSE);
+		    ins_compl_insert(FALSE);
 		}
 		// Delete preinserted text when typing special chars
 		else if (IS_WHITE_NL_OR_NUL(c) && ins_compl_preinsert_effect())
@@ -2197,7 +2197,7 @@ insertchar(
 	    i -= middle_len;
 
 	    // Check some expected things before we go on
-	    if (i >= 0 && lead_end[end_len - 1] == end_comment_pending)
+	    if (i >= 0 && end_len > 0 && lead_end[end_len - 1] == end_comment_pending)
 	    {
 		// Backspace over all the stuff we want to replace
 		backspace_until_column(i);
